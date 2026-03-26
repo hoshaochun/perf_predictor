@@ -4,11 +4,11 @@
 uv pip install -r requirements.txt
 ```
 ## Current Support
-* hardware: "4090", "h100-sxm", "h200-nvl"
-* model: "gpt-oss-20b", "qwen3-30b" (for qwen3-coder-30b-a3b)
+* hardware: 4090, h100-sxm, h200-nvl
+* model: gpt-oss-20b, qwen3-30b (for qwen3-coder-30b-a3b)
 ## Run Predictor
 Example Usage:
-```python=
+```
 python3 run_predictor.py \
     --gpu "h100-sxm" \
     --model "qwen3-30b" \
@@ -20,8 +20,8 @@ python3 run_predictor.py \
     --max-num-batched-tokens 8192
 ```
 ## Run Evaluation
-Example Usage
-```python=
+Example Usage:
+```
 python3 run_evaluation.py \
     --gpu "h200-nvl" \
     --model "gpt-oss-20b" \
