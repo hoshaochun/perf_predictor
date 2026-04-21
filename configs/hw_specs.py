@@ -40,32 +40,6 @@ class HardwareConfig:
     fp8_flops: float = 0.0  # FLOPs per second for fp8
     fp4_flops: float = 0.0  # FLOPs per second for fp4
     mxfp4_flops: float = 0.0 # FLOPs per second for mxfp4
-    
-    @property
-    def fp16_flops(self) -> float:
-        """FP16 FLOPS (same as bf16 for modern GPUs)."""
-        return self.bf16_flops
-    
-    def compute_time(self, flops: int, precision: str = "bf16") -> float:
-        """Estimate compute time in seconds (compute-bound)."""
-        if precision in ["fp8", "int8"]:
-            peak = self.fp8_flops if self.fp8_flops > 0 else self.bf16_flops * 2
-        elif precision in ["fp4", "int4"]:
-            peak = self.fp4_flops if self.fp4_flops > 0 else self.bf16_flops * 4
-        elif precision == "mxfp4":
-            peak = self.mxfp4_flops if self.mxfp4_flops > 0 else self.bf16_flops * 4
-        else:
-            peak = self.bf16_flops
-            
-        return flops / peak
-    
-    def memory_time(self, bytes_transferred: int) -> float:
-        """Estimate memory transfer time in seconds (memory-bound)."""
-        return bytes_transferred / self.mem_bandwidth
-    
-    def roofline_time(self, flops: int, bytes_transferred: int, precision: str = "bf16") -> float:
-        """Roofline model: max of compute and memory time."""
-        return max(self.compute_time(flops, precision), self.memory_time(bytes_transferred))
 
 
 @dataclass
@@ -155,7 +129,6 @@ PRESET_GPUS = {
         mem_capacity=24e9,  # 24 GB
         fp8_flops=330.3e12,  # ~2x BF16 (Ada Lovelace Tensor Cores)
         fp4_flops=0,  # Not supported natively
-        mxfp4_flops=0,
     ),
     "h100-sxm": HardwareConfig(
         name="h100-sxm",
@@ -164,7 +137,6 @@ PRESET_GPUS = {
         mem_capacity=80e9,  # 80 GB
         fp8_flops=3958e12,  # 3958 TFLOPS (dense)
         fp4_flops=0,  # Blackwell feature
-        mxfp4_flops=0,
     ),
     "h200-nvl": HardwareConfig(
         name="h200-nvl",
@@ -173,7 +145,6 @@ PRESET_GPUS = {
         mem_capacity=141e9,
         fp8_flops=1671e12,
         fp4_flops=0,
-        mxfp4_flops=0,
     ),
     "h100-pcie": HardwareConfig(
         name="h100-pcie",
@@ -182,7 +153,6 @@ PRESET_GPUS = {
         mem_capacity=80e9,
         fp8_flops=1513e12,
         fp4_flops=0,
-        mxfp4_flops=0,
     ),
     "a100-sxm": HardwareConfig(
         name="a100-sxm",
@@ -191,7 +161,6 @@ PRESET_GPUS = {
         mem_capacity=80e9,
         fp8_flops=624e12,  # No native FP8, fallback to BF16 speed or emulated
         fp4_flops=0,
-        mxfp4_flops=0,
     ),
     "a100-pcie": HardwareConfig(
         name="a100-pcie",
@@ -200,7 +169,14 @@ PRESET_GPUS = {
         mem_capacity=80e9,
         fp8_flops=624e12,
         fp4_flops=0,
-        mxfp4_flops=0,
+    ),
+    "b200": HardwareConfig(
+        name="b200",
+        bf16_flops=2.25e15,
+        mem_bandwidth=8e12,
+        mem_capacity=180e9,
+        fp8_flops=4.5e15,
+        fp4_flops=9e15,
     ),
 }
 

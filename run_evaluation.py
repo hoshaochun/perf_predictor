@@ -10,10 +10,12 @@ from predictor import (
     sum_latencies,
 )
 import numpy as np
+import matplotlib.pyplot as plt
+import json
 from tqdm import tqdm
 import csv
 from datetime import datetime
-
+import matplotlib.pyplot as plt
 
 def schedule_requests(waiting_queue, running_queue, args):
     max_num_batched_tokens = args.max_num_batched_tokens
@@ -67,6 +69,10 @@ def evaluate_latency_predictions(predicted_latencies, actual_latencies):
     preds = np.array(predicted_latencies)
     actuals = np.array(actual_latencies)
 
+    # Calculate request latency statistics
+    avg_actual = np.mean(actuals)
+    avg_predicted = np.mean(preds)
+
     # Calculate raw errors (Predicted - Actual)
     errors = preds - actuals
     abs_errors = np.abs(errors)
@@ -80,10 +86,11 @@ def evaluate_latency_predictions(predicted_latencies, actual_latencies):
     # 3. Mean Absolute Percentage Error (MAPE): Error relative to request length
     # (Avoid division by zero in case of anomalous 0-second actuals)
     safe_actuals = np.where(actuals == 0, 1e-9, actuals)
-    mape = np.mean(abs_errors / safe_actuals) * 100
+    apes = (abs_errors / safe_actuals) * 100  # Absolute Percentage Error per request
+    mape = np.mean(apes)
 
     # 4. Mean Bias: Shows systematic over-prediction (positive) or under-prediction (negative)
-    mean_bias = np.mean(errors)
+    mean_error = np.mean(errors)
 
     # 5. Tail Latency Errors: How bad are the worst 10% and 1% of predictions?
     p90_err = np.percentile(abs_errors, 90)
@@ -91,39 +98,75 @@ def evaluate_latency_predictions(predicted_latencies, actual_latencies):
 
     # Print a formatted report
     print("=== Latency Prediction Accuracy Analysis ===")
-    print(f"Total Requests Evaluated : {len(preds)}")
+    print(f"Avg Actual Latency       : {avg_actual:.3f}s")
+    print(f"Avg Predicted Latency    : {avg_predicted:.3f}s")
     print("-" * 42)
-    print(f"Mean Absolute Error (MAE): {mae:.4f}s")
-    print(f"Root Mean Square Error   : {rmse:.4f}s")
+    print(f"Mean Absolute Error (MAE): {mae:.3f}s")
     print(f"Mean Abs Percentage Error: {mape:.2f}%")
-    print(f"Mean Bias                : {mean_bias:.4f}s ", end="")
+    print(f"Mean Error               : {mean_error:.3f}s ", end="")
     print(
         "(Simulator is OVER-predicting)"
-        if mean_bias > 0
+        if mean_error > 0
         else "(Simulator is UNDER-predicting)"
     )
     print("-" * 42)
-    print(f"P90 Absolute Error       : {p90_err:.4f}s")
-    print(f"P99 Absolute Error       : {p99_err:.4f}s")
+    print(f"P90 Absolute Error       : {p90_err:.3f}s")
+    print(f"P99 Absolute Error       : {p99_err:.3f}s")
     print("============================================")
 
-    # Return as a dictionary in case you want to plot or log these later
+    # 6. Plotting
+    plt.figure(figsize=(10, 6))
+
+    # Weight each point so that the sum of all bins is 100%
+    weights = np.ones_like(apes) * 100.0 / len(apes)
+    
+    plt.hist(apes, bins=50, weights=weights, color='skyblue', edgecolor='black', alpha=0.8)
+    plt.title('Error Frequency: APE vs Percentage of Requests', fontsize=14)
+    plt.xlabel('Absolute Percentage Error (%)', fontsize=12)
+    plt.ylabel('Percentage of Requests (%)', fontsize=12)
+    plt.grid(True, linestyle='--', alpha=0.7)
+
+    plt.tight_layout()
+    
+    # Save the figure
+    plt.savefig('latency_evaluation_plot.png', dpi=300, bbox_inches='tight')
+    print("Chart saved successfully as 'latency_evaluation_plot.png'")
+    
+    plt.close()
+
+    # Return as a dictionary in case you want to log these later
     return {
+        "Avg_Actual": avg_actual,
         "MAE": mae,
-        "RMSE": rmse,
         "MAPE": mape,
-        "Mean Bias": mean_bias,
+        "Mean Error": mean_error,
         "P90_Error": p90_err,
         "P99_Error": p99_err,
     }
 
+def show_request_stats(requests, concurrencies):
+    input_lens = []
+    output_lens = []
+    for r_id, r in requests.items():
+        input_lens.append(int(r["input_tokens"]))
+        output_lens.append(int(r["output_tokens"]))
 
-def filter_requests(path, api_base):
-    with open(path, mode="r", newline="", encoding="utf-8") as csvfile:
-        # Create a dictionary reader object
+    input_lens = np.array(input_lens)
+    output_lens = np.array(output_lens)
+    cons = np.array(concurrencies)    
+
+    print("============ Request Statistics ============")
+    print(f"Total Requests Evaluated : {len(requests)}")
+    print(f"Avg Input Length         : {np.mean(input_lens):.0f} (max: {np.max(input_lens)})")
+    print(f"Avg Output Length        : {np.mean(output_lens):.0f} (max: {np.max(output_lens)})")
+    print(f"Avg Request Concurrency  : {np.mean(cons):.3f} (max: {np.max(cons)})")
+    
+
+def filter_requests(args):
+    with open(args.request_trace_file, mode="r", newline="", encoding="utf-8") as csvfile:
         csv_reader = csv.DictReader(csvfile)
 
-        # Iterate over each row (each row is a dictionary)
+        # Iterate over each row
         all_requests = []
         for row in csv_reader:
             if len(row["api_base"]) > 0 and row["api_base"][-1] != "/":
@@ -134,12 +177,15 @@ def filter_requests(path, api_base):
     selected_requests = {}
     for r in all_requests:
         if (
-            r["model"] == "openai/gpt-oss-20b"
-            and r["api_base"] == api_base
+            r["model"] == args.model
+            and r["api_base"] == args.api_base
             and int(r["input_tokens"]) > 0
             and int(r["output_tokens"]) > 0
+            and float(r["latency_ms"]) > 0
         ):
             selected_requests[r["id"]] = r
+            if len(selected_requests) >= args.num_requests:
+                break
 
     return selected_requests
 
@@ -188,14 +234,54 @@ def parse_args():
         default=None,
         help="The api base for evaluation",
     )
+    parser.add_argument(
+        "--bench-file", 
+        type=str, 
+        default=None, 
+        help="Results from microbenchmarks"
+    )
 
     return parser.parse_args()
+
+def max_overlapping_intervals(intervals):
+    """
+    Finds the maximum number of overlapping time intervals.
+    
+    :param intervals: List of lists or tuples, e.g., [[1, 4], [2, 5], [7, 9]]
+    :return: Integer representing the maximum overlaps at any given time.
+    """
+    if not intervals:
+        return 0
+
+    events = []
+    
+    # 1. Separate into start and end events
+    for start, end in intervals:
+        events.append((start, 1))   # +1 means an interval is starting
+        events.append((end, -1))    # -1 means an interval is ending
+        
+    # 2. Sort the events
+    # We sort by time (x[0]). 
+    # If times are identical, the ending event (-1) will be processed before 
+    # the starting event (1). This ensures contiguous intervals like [1, 3] 
+    # and [3, 5] are not counted as overlapping.
+    events.sort(key=lambda x: (x[0], x[1]))
+    
+    max_overlaps = 0
+    current_overlaps = 0
+    
+    # 3. Sweep through the timeline
+    for time, event_type in events:
+        current_overlaps += event_type
+        max_overlaps = max(max_overlaps, current_overlaps)
+        
+    return max_overlaps
 
 
 if __name__ == "__main__":
     args = parse_args()
 
-    selected_requests = filter_requests(args.request_trace_file, args.api_base)
+    selected_requests = filter_requests(args)
 
     request_pool = []
     for r in selected_requests.values():
@@ -208,8 +294,6 @@ if __name__ == "__main__":
             )
         )
 
-        if len(request_pool) >= args.num_requests:
-            break
 
     request_pool.sort(key=lambda x: x.start_time)
 
@@ -219,6 +303,11 @@ if __name__ == "__main__":
     # Workload configuration
     model = PRESET_MODELS[args.model]
 
+    # Microbenchmark results
+    bench_data = None
+    if args.bench_file:
+        with open(args.bench_file) as f:
+            bench_data = json.load(f)
 
     # Initialize the simulation clock to the first request's arrival time
     current_time = request_pool[0].start_time if request_pool else 0.0
@@ -227,6 +316,7 @@ if __name__ == "__main__":
     finished_queue = []
 
     simulation_latency = default_latency_dict()
+    concurrencies = []
     pbar = tqdm(total=len(request_pool))
 
     # Expanded the while condition to ensure the loop doesn't end if requests are still arriving or waiting
@@ -255,15 +345,10 @@ if __name__ == "__main__":
         # Give the scheduler only the requests that have actually arrived
         schedule_requests(waiting_queue, running_queue, args)
 
-        # Edge Case: If the scheduler couldn't run anything (e.g. waiting for memory to free up)
-        # tick the clock forward slightly to prevent an infinite loop.
-        if len(running_queue) == 0:
-            current_time += 0.001  # 1 millisecond tick (adjust based on your scale)
-            continue
-
         # 4. FORWARD PASS
+        concurrencies.append(len(running_queue))
         forward_latency = estimate_forward_latency(
-            running_queue, gpu, model
+            running_queue, bench_data, gpu, model
         )
         add_latency_dicts(simulation_latency, forward_latency)
 
@@ -305,16 +390,24 @@ if __name__ == "__main__":
 
     pbar.close()
 
+    # Collect latency prediction results
     predicted_list = []
     actual_list = []
     for r in finished_queue:
         # Ensure every simulated request has a match in the real data
         if r.id in selected_requests:
-            predicted_list.append(r.finish_time - r.start_time)
-            actual_list.append(float(selected_requests[r.id]["latency_ms"]))
-
+            actual = float(selected_requests[r.id]["latency_ms"])
+            predicted = r.finish_time - r.start_time
+            actual_list.append(actual)
+            predicted_list.append(predicted)
+            error = abs(actual - predicted) / actual * 100
+            print(f"actual: {actual:.3f}, predicted: {predicted:.3f}, error: {error:.1f}%, l_in: {r.input_len}, l_out: {r.output_len}")
+            # print(selected_requests[r.id])
         else:
             print(f"Warning: Missing ground truth for request {r.id}")
+
+    # Show request statistics
+    show_request_stats(selected_requests, concurrencies)
 
     # Run the evaluation
     metrics = evaluate_latency_predictions(predicted_list, actual_list)

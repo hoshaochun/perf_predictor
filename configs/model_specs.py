@@ -42,18 +42,22 @@ class ModelConfig:
     """Configuration for a Mixture of Experts model."""
     
     name: str
-    quantization: str = "bf16"
-    n_layers: int = 32
-    hidden_size: int = 4096  # model_d
-    vocab_size: int = 32000
-    n_attention_heads: int = 32
-    n_kv_heads: int = 8
-    intermediate_size: int = 14336  # FFN intermediate dimension
-    n_experts: int = 8
-    top_k: int = 2  # experts per token
-    max_seq_len: int = 32768
-    head_dim: int = 128
-    moe_intermediate_size: int = 14336
+    model_orig_dtype: str
+    ffn_weight_dtype: str
+    attn_weight_dtype: str
+    activation_dtype: str
+    kv_cache_dtype: str
+    n_layers: int
+    hidden_size: int # model_d
+    vocab_size: int
+    n_attention_heads: int
+    n_kv_heads: int
+    intermediate_size: int # FFN intermediate dimension
+    n_experts: int
+    top_k: int # experts per token
+    max_seq_len: int
+    head_dim: int
+    moe_intermediate_size: int
     
     # Sliding window attention support
     layer_types: Optional[List[str]] = None  # List of attention types per layer ("full_attention" or "sliding_attention")
@@ -319,75 +323,33 @@ class ModelConfig:
 
 # Preset model configurations
 PRESET_MODELS = {
-    "mixtral-8x7b": ModelConfig(
-        name="mixtral-8x7b",
-        quantization="bf16",
-        n_layers=32,
-        hidden_size=4096,
-        vocab_size=32000,
-        n_attention_heads=32,
-        n_kv_heads=8,
-        intermediate_size=14336,
-        n_experts=8,
-        top_k=2,
-        max_seq_len=32768,
-    ),
-    "mixtral-8x22b": ModelConfig(
-        name="mixtral-8x22b",
-        quantization="bf16",
-        n_layers=56,
-        hidden_size=6144,
-        vocab_size=32000,
-        n_attention_heads=48,
-        n_kv_heads=8,
-        intermediate_size=16384,
-        n_experts=8,
-        top_k=2,
-        max_seq_len=65536,
-    ),
-    "deepseek-moe-16b": ModelConfig(
-        name="deepseek-moe-16b",
-        quantization="bf16",
-        n_layers=28,
-        hidden_size=2048,
-        vocab_size=102400,
-        n_attention_heads=16,
-        n_kv_heads=16,
-        intermediate_size=10944,
-        n_experts=64,
-        top_k=6,
-        max_seq_len=4096,
-    ),
-    "qwen2.5-7b": ModelConfig(
-        name="qwen2.5-7b",
-        quantization="bf16",
-        n_layers=28,
-        hidden_size=3584,
-        vocab_size=152064,
-        n_attention_heads=28,
-        n_kv_heads=4,
-        intermediate_size=18944,
-        n_experts=1,
-        top_k=1,
-        max_seq_len=131072,
-    ),
-    "gpt-oss-20b": ModelConfig(
-        name="gpt-oss-20b",
-        quantization="mxfp4",
+    "openai/gpt-oss-20b": ModelConfig(
+        name="openai/gpt-oss-20b",
+        model_orig_dtype="bf16",
+        ffn_weight_dtype="mxfp4",
+        attn_weight_dtype="bf16",
+        activation_dtype="bf16",
+        kv_cache_dtype="bf16",
         n_layers=24,
         hidden_size=2880,
         vocab_size=201088,
         n_attention_heads=64,
         n_kv_heads=8,
+        head_dim=64,
         intermediate_size=2880,
+        moe_intermediate_size=2880,
         n_experts=32,
         top_k=4,
         max_seq_len=131072,
         sliding_window=128
     ),
-    "qwen3-30b": ModelConfig(
-        name="qwen3-30b",
-        quantization="bf16",
+    "Qwen/Qwen3-Coder-30B-A3B-Instruct": ModelConfig(
+        name="Qwen/Qwen3-Coder-30B-A3B-Instruct",
+        model_orig_dtype="bf16",
+        ffn_weight_dtype="bf16",
+        attn_weight_dtype="bf16",
+        activation_dtype="bf16",
+        kv_cache_dtype="bf16",
         n_layers=48,
         hidden_size=2048,
         vocab_size=151936,
@@ -399,7 +361,25 @@ PRESET_MODELS = {
         n_experts=128,
         top_k=8,
         max_seq_len=262144,
-        sliding_window="null"
+    ),
+    "cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit": ModelConfig(
+        name="cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit",
+        model_orig_dtype="bf16",
+        ffn_weight_dtype="int4",
+        attn_weight_dtype="int4",
+        activation_dtype="bf16",
+        kv_cache_dtype="bf16",
+        n_layers=48,
+        hidden_size=2048,
+        vocab_size=151936,
+        n_attention_heads=32,
+        n_kv_heads=4,
+        head_dim=128,
+        intermediate_size=5472,
+        moe_intermediate_size=768,
+        n_experts=128,
+        top_k=8,
+        max_seq_len=262144,
     ),
 }
 

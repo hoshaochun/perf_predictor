@@ -1,0 +1,3 @@
+torch
+cupti-python
+scipy

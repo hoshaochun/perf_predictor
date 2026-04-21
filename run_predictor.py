@@ -2,6 +2,7 @@ import argparse
 import csv
 import random
 import numpy as np
+import json
 from tqdm import tqdm
 from configs.hw_specs import PRESET_GPUS
 from configs.model_specs import PRESET_MODELS
@@ -62,6 +63,8 @@ def schedule_requests(request_pool, waiting_queue, running_queue, args):
         running_queue.append(request)
 
 
+import numpy as np
+
 def analyze_performance(finished_queue, simulation_latency):
     simulation_latency = sum_latencies(simulation_latency)
     
@@ -85,16 +88,21 @@ def analyze_performance(finished_queue, simulation_latency):
     # Store tuples of (bound, compute, memory)
     sum_prefill_attn = np.zeros(3)
     sum_prefill_ffn = np.zeros(3)
+    sum_prefill_llm_head = np.zeros(3) # Added llm_head
+    
     sum_decode_attn = np.zeros(3)
     sum_decode_ffn = np.zeros(3)
+    sum_decode_llm_head = np.zeros(3) # Added llm_head
     
     sum_total_latency = 0.0
 
     # Helper function to extract (bound, c, m) totals for specific operations
     def get_metrics(phase_dict, keys):
-        b = sum(phase_dict[k].bound for k in keys)
-        c = sum(phase_dict[k].c for k in keys)
-        m = sum(phase_dict[k].m for k in keys)
+        # Added a check in case a key might be missing from some phases
+        valid_keys = [k for k in keys if k in phase_dict]
+        b = sum(phase_dict[k].bound for k in valid_keys)
+        c = sum(phase_dict[k].c for k in valid_keys)
+        m = sum(phase_dict[k].m for k in valid_keys)
         return np.array([b, c, m])
 
     for r in finished_queue:
@@ -104,12 +112,16 @@ def analyze_performance(finished_queue, simulation_latency):
         # Prefill Aggregations
         p_attn = get_metrics(r.latency.prefill, ["qkv", "attn_score", "o"])
         p_ffn = get_metrics(r.latency.prefill, ["up_proj", "down_proj"])
+        p_llm_head = get_metrics(r.latency.prefill, ["llm_head"]) # Added llm_head
+        
         total_prefill = sum(op.bound for op in r.latency.prefill.values())
         sum_total_prefill += total_prefill
 
         # Decode Aggregations
         d_attn = get_metrics(r.latency.decode, ["qkv", "attn_score", "o"])
         d_ffn = get_metrics(r.latency.decode, ["up_proj", "down_proj"])
+        d_llm_head = get_metrics(r.latency.decode, ["llm_head"]) # Added llm_head
+        
         total_decode = sum(op.bound for op in r.latency.decode.values())
         sum_total_decode += total_decode
         
@@ -120,8 +132,11 @@ def analyze_performance(finished_queue, simulation_latency):
         # Add to component totals
         sum_prefill_attn += p_attn
         sum_prefill_ffn += p_ffn
+        sum_prefill_llm_head += p_llm_head # Added llm_head
+        
         sum_decode_attn += d_attn
         sum_decode_ffn += d_ffn
+        sum_decode_llm_head += d_llm_head # Added llm_head
         
         sum_total_latency += (waiting_time + total_prefill + total_decode)
         sum_total_tokens += (r.input_len + r.output_len)
@@ -136,8 +151,11 @@ def analyze_performance(finished_queue, simulation_latency):
     
     avg_p_attn = sum_prefill_attn / num_finished
     avg_p_ffn = sum_prefill_ffn / num_finished
+    avg_p_llm_head = sum_prefill_llm_head / num_finished # Added llm_head
+    
     avg_d_attn = sum_decode_attn / num_finished
     avg_d_ffn = sum_decode_ffn / num_finished
+    avg_d_llm_head = sum_decode_llm_head / num_finished # Added llm_head
 
     def calc_pct(val, total):
         return (val / total * 100) if total > 0 else 0.0
@@ -174,11 +192,14 @@ def analyze_performance(finished_queue, simulation_latency):
     print(f"{'Component':<18} | {'Bound(s)':<8} | {'% Total':<8} | {'Compute(s)':<10} | {'Memory(s)':<9} | {'Bottleneck':<10}")
     print("-" * 76)
     
+    # Added LLM Head to components list
     components = [
         ("Prefill Attention", avg_p_attn),
         ("Prefill FFN", avg_p_ffn),
+        ("Prefill LLM Head", avg_p_llm_head),
         ("Decode Attention", avg_d_attn),
-        ("Decode FFN", avg_d_ffn)
+        ("Decode FFN", avg_d_ffn),
+        ("Decode LLM Head", avg_d_llm_head)
     ]
     
     total_compute_bound_time = 0.0
@@ -290,6 +311,12 @@ def parse_args():
         default=8192, 
         help="Maximum number of batched tokens (default: 8192)"
     )
+    parser.add_argument(
+        "--bench-file", 
+        type=str, 
+        default=None, 
+        help="Results from microbenchmarks"
+    )
 
     return parser.parse_args()
 
@@ -298,6 +325,12 @@ if __name__ == "__main__":
     gpu = PRESET_GPUS[args.gpu]
     model = PRESET_MODELS[args.model]
 
+    # read microbenchmark results
+    bench_data = None
+    if args.bench_file:
+        with open(args.bench_file) as f:
+            bench_data = json.load(f)
+ 
     request_pool = []
     waiting_queue = []
     running_queue = []
@@ -325,7 +358,7 @@ if __name__ == "__main__":
         schedule_requests(request_pool, waiting_queue, running_queue, args)
 
         # forward pass
-        forward_latency = estimate_forward_latency(running_queue, gpu, model)
+        forward_latency = estimate_forward_latency(running_queue, bench_data, gpu, model)
         add_latency_dicts(simulation_latency, forward_latency)
 
         # update request status
